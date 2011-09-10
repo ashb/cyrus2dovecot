@@ -376,22 +376,29 @@ sub slurp ($) {
 }
 
 #
-# Resolve "%u", "%h", "x", and "%<n>u" within pathnames.  Modify the specified
-# arguments directly (as opposed to returning the new pathnames).
+# Resolve "%u", "%h", "%x", "%d", %dh", "%n" and "%<n>u" within
+# pathnames.  Modify the specified arguments directly (as opposed to
+# returning the new pathnames).
 #
 sub fixpath ($@) {
 	my $user = shift;
 	my @char = split(//, $user);
-	my $hash = $char[0];
+	my $hash = lc $char[0];
 	my $fullhash = c_fulldirhash($user);
 
-	if ($hash !~ /^[a-z]$/) {
-		# This is how Cyrus "hashes" non-[a-z]-characters.
-		$hash = ($hash =~ /^[A-Z]$/) ? lc($hash) : 'q';
-	}
+	my ($local, $domain, $d_hash);
+	($local, $domain) = split(/@/, $user);
+	$d_hash = lc substr $domain, 0, 1;
+
+	# This is how Cyrus "hashes" non-[a-z]-characters.
+	$hash =~ s/[^a-z]/q/;
+	$d_hash =~ s/[^a-z]/q/;
 
 	for (@_) {
+		s/%dh/$d_hash/g;
 		s/%u/$user/g;
+		s/%n/$local/g;
+		s/%d/$domain/g;
 		s/%h/$hash/g;
 		s/%x/$fullhash/g;
 		s/%(\d+)u/$char[$1-1]/g;
@@ -1335,13 +1342,15 @@ F<maildirsize> files are created.
 =head1 OPTIONS
 
 Within the specified I<PATH>s, any occurrence of C<%u> will be replaced
-by the current I<user> name, any occurrence of C<%I<n>u> will be
+by the full I<user> name, C<%l> and C<%d> will be replaced by the local
+and domain parts of I<user>, any occurrence of C<%I<n>u> will be
 replaced by the I<n>'th character of that I<user> name, any occurrence
 of C<%h> will be replaced by Cyrus' directory "hash" character for that
 I<user> name (i.e., C<%h> is equivalent to C<%1u> if the first character
-of the I<user> name is a lowercase letter), and any occurrence of C<%x>
-will be replaced by Cyrus' "fulldirhash" character for that I<user>
-name.  However, within the specified B<--cyrus-quota> I<PATH> (if any),
+of the I<user> name is a lowercase letter), C<%dh> will be the "hash"
+character for the domain of I<user> and any occurrence of C<%x> will be
+replaced by Cyrus' "fulldirhash" character for that I<user> name.
+However, within the specified B<--cyrus-quota> I<PATH> (if any),
 these replacements will only be done if the B<--cyrus-quota-format>
 I<VERSION> is set to C<1>.
 
@@ -1488,6 +1497,18 @@ found):
 	              --cyrus-quota-format 1                    \
 	              --dovecot-inbox /tmp/dovecot/%u/Maildir   \
 	              bill george
+
+If you use virtual domains (by setting C<virtdomains: userid> in
+the cyrus imap config and C<mail_home = /var/vmail/%d/%n> and
+C<mail_location = maildir:~/mail> ) and have a similar path setting to
+above, the following will convert emails for bill@example.com and
+geogre@example2.com
+
+	cyrus2dovecot --cyrus-inbox /var/spool/imap/domain/%dh/%d/%h/user/%n/ \
+	              --cyrus-seen /var/imap/domain/%dh/%d/user/%h/%n.seen    \
+	              --cyrus-sub /var/imap/domain/%dh/%d/user/%h/%n.sub      \
+	              --dovecot-inbox /var/vmail/%d/%n/mail                 \
+	              bill@example.com geogre@example2.com
 
 A script such as the following could be used in order to convert all
 e-mails of all I<user>s (of course, the pathnames and the desired quota
